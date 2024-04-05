@@ -1,0 +1,1 @@
+1. Install OpenJDK for Java support
