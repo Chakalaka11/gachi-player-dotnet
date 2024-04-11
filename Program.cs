@@ -1,7 +1,7 @@
 ﻿using DSharpPlus;
-using DSharpPlus.Lavalink;
 using DSharpPlus.Net;
 using DSharpPlus.SlashCommands;
+using DSharpPlus.VoiceNext;
 using Microsoft.Extensions.Configuration;
 
 namespace GachiPlayerDotnet;
@@ -22,26 +22,13 @@ class Program
             TokenType = TokenType.Bot,
             Intents = DiscordIntents.Guilds | DiscordIntents.GuildVoiceStates
         });
-        var endpoint = new ConnectionEndpoint
-        {
-            Hostname = "127.0.0.1", // From your server configuration.
-            Port = 2333 // From your server configuration
-        };
 
-        var lavalinkConfig = new LavalinkConfiguration
-        {
-            Password = configuration["LavalinkPass"], // From your server configuration.
-            RestEndpoint = endpoint,
-            SocketEndpoint = endpoint
-        };
-
-        var lavalink = discord.UseLavalink();
         var slash = discord.UseSlashCommands();
         slash.RegisterCommands<SlashCommands>();
         slash.RegisterCommands<PlayerCommands>();
 
+        discord.UseVoiceNext();
         await discord.ConnectAsync();
-        await lavalink.ConnectAsync(lavalinkConfig); 
         await Task.Delay(-1);
     }
 }

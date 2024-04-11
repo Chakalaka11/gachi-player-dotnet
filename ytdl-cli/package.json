@@ -1,0 +1,17 @@
+{
+  "name": "ytld-cli",
+  "version": "1.0.0",
+  "description": "Simple YT CLI downloader",
+  "main": "index.js",
+  "scripts": { },
+  "author": "chakalaka11",
+  "license": "ISC",
+  "dependencies": {
+    "commander": "^12.0.0",
+    "ytdl-core": "^4.11.5"
+  },
+  "bin": {
+    "ytdl-cli": "./index.js"
+  },
+  "repository": "https://github.com/Chakalaka11/youtube-download-cli.git"
+}
