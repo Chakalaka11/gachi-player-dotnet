@@ -2,10 +2,13 @@ using System.Buffers;
 using System.Diagnostics;
 using DSharpPlus.Entities;
 using DSharpPlus.VoiceNext;
+using Microsoft.Extensions.Logging;
 
 public class ChannelPlayer
 {
     public ulong ChannelId { get; private set; }
+    public ulong GuildId { get; private set; }
+    public bool IsConnected { get; private set; }
 
 
     #region Private fields
@@ -13,38 +16,58 @@ public class ChannelPlayer
     private Thread _thread;
     private Stack<string> _playlist = new Stack<string>();
 
-    // Default waiting 2 min
+    // Default waiting 15 sec
     private int _waitingTresholdInMilliseconds = 15 * 1000;
     private int _waitingIncrement = 100;
 
-    private CancellationTokenSource playSongCancellationTokenSource;
+    private bool _isSongRepeating = false;
 
-    private CancellationTokenSource disconnectCancellationTokenSource;
+    private bool isSongSkipped = false;
+
+    private bool isDisconnectedManually = false;
+    
+    private ILogger logger;
+    
     #endregion
 
-    public ChannelPlayer(ulong channelId)
+    public ChannelPlayer(ulong channelId, ulong guildId)
     {
+        using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
+        logger = factory.CreateLogger(nameof(ChannelPlayer));
         ChannelId = channelId;
+        GuildId = guildId;
+        IsConnected = false;
         _thread = new Thread(PlaySongs);
+        logger.LogInformation($"Channel player initialized for {channelId}");
     }
 
     public async Task ConnectAsync(DiscordChannel channel)
     {
-        if (_voiceConnection == null)
+        logger.LogInformation($"Connecting player...");
+        if (!IsConnected)
         {
             _voiceConnection = await channel.ConnectAsync();
-            Console.WriteLine("Connect to voice channel.");
+            IsConnected = true;
+            logger.LogInformation("Connected to voice channel.");
         }
         else
         {
-            Console.WriteLine("Voice already connected.");
+            logger.LogInformation("Voice already connected.");
         }
     }
 
     public void Disconnect()
     {
-        playSongCancellationTokenSource.Cancel();
-        disconnectCancellationTokenSource.Cancel();
+        logger.LogInformation($"Disconnecting player...");
+
+        if(!IsConnected)
+        {
+            logger.LogWarning("Player wasn't connected to channel, returning.");
+            return;
+        }
+
+        isSongSkipped = true;
+        isDisconnectedManually = true;
         _playlist.Clear();
         
         if (_voiceConnection != null)
@@ -52,14 +75,12 @@ public class ChannelPlayer
             _voiceConnection.Disconnect();
             _voiceConnection = null;
         }
-
-        playSongCancellationTokenSource.Dispose();
-        disconnectCancellationTokenSource.Dispose();
+        IsConnected = false;
     }
 
     public void AddSongToPlaylist(string songPath)
     {
-        Console.WriteLine("Adding song...");
+        logger.LogInformation("Adding song...");
         _playlist.Push(songPath);
         StartPlayback();
     }
@@ -69,6 +90,7 @@ public class ChannelPlayer
         if (!_thread.IsAlive)
         {
             // Recreate thread if it was closed previously
+            Console.WriteLine($"Thread status {_thread.ThreadState}");
             if(_thread.ThreadState == System.Threading.ThreadState.Stopped)
             {
                 _thread = new Thread(PlaySongs);
@@ -80,24 +102,28 @@ public class ChannelPlayer
             }
             catch (System.Exception ex)
             {
-                Console.WriteLine($"{ex.Message}");
+                logger.LogError($"Exception caught with starting new thread, details - {ex.Message}");
             }
         }
     }
 
+    public bool ToggleRepeat()
+    {
+        return this._isSongRepeating = !_isSongRepeating;
+    }
+
     public void SkipSong()
     {
-        playSongCancellationTokenSource.Cancel();
+        isSongSkipped = true;
     }
 
     private void PlaySongs()
     {
-        disconnectCancellationTokenSource = new CancellationTokenSource();
+        isDisconnectedManually = false;
 
         while (_playlist.Any())
         {
-            // Re-initialized tokens
-            playSongCancellationTokenSource = new CancellationTokenSource();
+            isSongSkipped = false;
 
             var nextTrack = _playlist.Pop();
             var processParams = new ProcessStartInfo
@@ -111,8 +137,8 @@ public class ChannelPlayer
             using (var ffmpeg = Process.Start(processParams))
             using (Stream pcm = ffmpeg!.StandardOutput.BaseStream)
             {
-                try
-                {                        
+                do
+                {
                     var transmit = _voiceConnection!.GetTransmitSink();
 
                     int bufferLength = transmit.SampleLength;
@@ -122,25 +148,22 @@ public class ChannelPlayer
                         int length;
                         while ((length = pcm.Read(buffer, 0, bufferLength)) != 0)
                         {
-                            transmit.WriteAsync(new ReadOnlyMemory<byte>(buffer, 0, length), playSongCancellationTokenSource.Token).Wait();
+                            if(isSongSkipped)
+                                break;  
+                            transmit.WriteAsync(new ReadOnlyMemory<byte>(buffer, 0, length)).Wait();
                         }
                     }
                     finally
                     {
                         ArrayPool<byte>.Shared.Return(buffer);
                     }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Song Canceled");
-                    Console.WriteLine("Exception details: " + ex.ToString());
-                }
+                } while (_isSongRepeating);
             }
-            
 
-            if (disconnectCancellationTokenSource.Token.IsCancellationRequested)
+
+            if (isDisconnectedManually)
             {
-                // Exit from playlist
+                //If forced disconnect - exit from playlist
                 break;
             }
 
@@ -156,9 +179,6 @@ public class ChannelPlayer
                     return;
                 }
             }
-            
-            // Clear tokens
-            playSongCancellationTokenSource.Dispose();
         }
     }
 }

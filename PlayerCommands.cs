@@ -1,18 +1,20 @@
-using System.Diagnostics;
 using DSharpPlus;
-using DSharpPlus.AsyncEvents;
 using DSharpPlus.Entities;
 using DSharpPlus.SlashCommands;
-using DSharpPlus.VoiceNext;
+using Microsoft.Extensions.Logging;
 
 namespace GachiPlayerDotnet;
 [SlashModuleLifespan(SlashModuleLifespan.Singleton)]
 public class PlayerCommands : ApplicationCommandModule
 {
     private PlayerService playerService;
+    private ILogger logger;
     public PlayerCommands()
     {
-        Console.WriteLine("Player commands initialized!");
+        using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
+        logger = factory.CreateLogger(nameof(PlayerCommands));
+
+        logger.LogInformation("Player commands initialized!");
         playerService = new PlayerService();
     }
 
@@ -30,9 +32,14 @@ public class PlayerCommands : ApplicationCommandModule
             new DiscordInteractionResponseBuilder()
                 .WithContent("Url received, trying to play..."));
 
-        await playerService.AddSongToPlaylist(ctx.Channel, url);
-        
-        await ctx.EditResponseAsync(new DiscordWebhookBuilder().WithContent($"Now playing {url}"));
+        if(await playerService.AddSongToPlaylist(ctx.Channel, url))
+        {
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().WithContent($"Added song {url}"));
+        }
+        else
+        {
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().WithContent($"Error occured when trying to add song, please check if its valid URL - {url}"));
+        }
     }
 
     [SlashCommand("skip", "Skips current song.")]
@@ -40,5 +47,19 @@ public class PlayerCommands : ApplicationCommandModule
     {
         playerService.SkipSong(ctx.Channel);
         await ctx.CreateResponseAsync("Skipped song!");
+    }
+
+
+    [SlashCommand("repeat", "Repeat current song.")]
+    public async Task RepeatCommand(InteractionContext ctx)
+    {
+        if (playerService.RepeatSong(ctx.Channel))
+        {
+            await ctx.CreateResponseAsync("Song is repeating.");
+        }
+        else
+        {
+            await ctx.CreateResponseAsync("Song is not repeating.");
+        }
     }
 }
