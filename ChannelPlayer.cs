@@ -12,6 +12,7 @@ public class ChannelPlayer
 
 
     #region Private fields
+    private YtdlLoader _ytdlLoader = new YtdlLoader();
     private VoiceNextConnection? _voiceConnection;
     private Thread _thread;
     private Stack<string> _playlist = new Stack<string>();
@@ -78,10 +79,10 @@ public class ChannelPlayer
         IsConnected = false;
     }
 
-    public void AddSongToPlaylist(string songPath)
+    public void AddSongToPlaylist(string songUrl)
     {
         logger.LogInformation("Adding song...");
-        _playlist.Push(songPath);
+        _playlist.Push(songUrl);
         StartPlayback();
     }
 
@@ -121,43 +122,50 @@ public class ChannelPlayer
     {
         isDisconnectedManually = false;
 
+        // Rework trhis part
         while (_playlist.Any())
         {
             isSongSkipped = false;
 
-            var nextTrack = _playlist.Pop();
-            var processParams = new ProcessStartInfo
-            {
-                FileName = "ffmpeg",
-                Arguments = $@"-i ""{nextTrack}"" -ac 2 -f s16le -ar 48000 -hide_banner -loglevel error pipe:1",
-                RedirectStandardOutput = true,
-                UseShellExecute = false
-            };
+            var nextTrackUrl = _playlist.Pop();
+            var nextTrack = _ytdlLoader.LoadFromUrl(nextTrackUrl);
 
-            using (var ffmpeg = Process.Start(processParams))
-            using (Stream pcm = ffmpeg!.StandardOutput.BaseStream)
+            if (!string.IsNullOrEmpty(nextTrack))
             {
-                do
+
+                var processParams = new ProcessStartInfo
                 {
-                    var transmit = _voiceConnection!.GetTransmitSink();
+                    FileName = "ffmpeg",
+                    Arguments = $@"-i ""{nextTrack}"" -ac 2 -f s16le -ar 48000 -hide_banner -loglevel error pipe:1",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false
+                };
 
-                    int bufferLength = transmit.SampleLength;
-                    byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferLength);
-                    try
+                using (var ffmpeg = Process.Start(processParams))
+                using (Stream pcm = ffmpeg!.StandardOutput.BaseStream)
+                {
+                    do
                     {
-                        int length;
-                        while ((length = pcm.Read(buffer, 0, bufferLength)) != 0)
+                        var transmit = _voiceConnection!.GetTransmitSink();
+
+                        int bufferLength = transmit.SampleLength;
+                        byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferLength);
+                        try
                         {
-                            if(isSongSkipped)
-                                break;  
-                            transmit.WriteAsync(new ReadOnlyMemory<byte>(buffer, 0, length)).Wait();
+                            int length;
+                            while ((length = pcm.Read(buffer, 0, bufferLength)) != 0)
+                            {
+                                if (isSongSkipped)
+                                    break;
+                                transmit.WriteAsync(new ReadOnlyMemory<byte>(buffer, 0, length)).Wait();
+                            }
                         }
-                    }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(buffer);
-                    }
-                } while (_isSongRepeating);
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(buffer);
+                        }
+                    } while (_isSongRepeating);
+                }
             }
 
 

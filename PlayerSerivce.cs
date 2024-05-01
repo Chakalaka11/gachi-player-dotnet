@@ -4,14 +4,13 @@ using Microsoft.Extensions.Logging;
 
 public class PlayerService
 {
-    private YtdlLoader _ytdlLoader = new YtdlLoader();
     private Dictionary<ulong, ChannelPlayer> _channelPlayers = new Dictionary<ulong, ChannelPlayer>();
     private ILogger logger;
 
     public PlayerService() 
     {
         using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
-        logger = factory.CreateLogger("Program");
+        logger = factory.CreateLogger(nameof(PlayerService));
     }
 
     public void DisconnectAsync(DiscordChannel channel) 
@@ -32,13 +31,8 @@ public class PlayerService
         }
 
         await _channelPlayers[channel.Id].ConnectAsync(channel);
-        var path = _ytdlLoader.LoadFromUrl(songUrl);
-        if (string.IsNullOrEmpty(path))
-        {
-            logger.LogWarning($"Provided URL was invalid (maybe vid is inaccessible to download), URL - {songUrl}");
-            return false;
-        }
-        _channelPlayers[channel.Id].AddSongToPlaylist(path);
+
+        _channelPlayers[channel.Id].AddSongToPlaylist(songUrl);
         return true;
     }
 
